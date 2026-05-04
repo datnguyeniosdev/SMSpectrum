@@ -1,17 +1,35 @@
 import Foundation
-import AVFoundation
 import MetalKit
+import QuartzCore
 import SMSpectrumRenderer
 
 #if canImport(UIKit)
 import UIKit
 #endif
 
-/// The primary visualization view.
+/// The visualization view — display only.
 ///
-/// Combines an `AudioEngine` (PCM ingest), an `FFTProcessor` (DSP), a
-/// `RenderFrameBuilder` (per-style frame composition), and a `SpectrumRenderer`
-/// (Metal draw). Acts as an `MTKViewDelegate` to drive frames at display rate.
+/// `SMSpectrumView` consumes pre-computed magnitudes (one value per band,
+/// 0...1) and renders them using the configured `SMStyle`. It does NOT
+/// capture audio or run FFT — that responsibility belongs to
+/// `SMAudioSpectrumDriver` (or whatever DSP source you choose to implement).
+///
+/// ## Driving the view
+///
+/// **Custom data** (network feed, simulation, your own DSP):
+/// ```swift
+/// let view = try SMSpectrumView(configuration: .digital)
+/// // ...later, per frame:
+/// view.push(magnitudes: myMagnitudes)
+/// ```
+///
+/// **Live audio** (microphone, file, external `AVAudioEngine`):
+/// ```swift
+/// let view = try SMSpectrumView(configuration: .digital)
+/// let driver = SMAudioSpectrumDriver(configuration: .digital)
+/// driver.attach(to: view)
+/// try driver.start(source: .microphone)
+/// ```
 public final class SMSpectrumView: MTKView {
 
     // MARK: - Public
@@ -22,19 +40,11 @@ public final class SMSpectrumView: MTKView {
         didSet { applyConfiguration() }
     }
 
-    public var source: SMSource {
-        didSet { reloadSource() }
-    }
-
-    public private(set) var isRunning: Bool = false
-
     // MARK: - Internal services
 
     private let renderer: SpectrumRenderer
-    private let audioEngine: AudioEngine
-    private let fftProcessor: FFTProcessor
     private let frameBuilder: RenderFrameBuilder
-    private let renderQueue = DispatchQueue(label: "com.darrennguyen.smspectrum.render", qos: .userInteractive)
+    private let pushQueue = DispatchQueue(label: "com.darrennguyen.smspectrum.push", qos: .userInteractive)
 
     private var latestFrame: RenderFrame?
     private let frameLock = NSLock()
@@ -43,11 +53,9 @@ public final class SMSpectrumView: MTKView {
 
     public init(
         frame: CGRect = .zero,
-        configuration: SMConfiguration = .digital,
-        source: SMSource = .microphone
+        configuration: SMConfiguration = .digital
     ) throws {
         self.configuration = configuration
-        self.source = source
 
         do {
             self.renderer = try SpectrumRenderer()
@@ -55,21 +63,11 @@ public final class SMSpectrumView: MTKView {
             throw SMError.rendererInitializationFailed(underlying: error)
         }
 
-        self.audioEngine = AudioEngine()
-        self.fftProcessor = FFTProcessor(fftSize: configuration.fftSize)
         self.frameBuilder = RenderFrameBuilder(configuration: configuration)
 
         super.init(frame: frame, device: renderer.device)
-
         renderer.attach(to: self)
         delegate = self
-
-        audioEngine.onPCMBuffer = { [weak self] buffer, sampleRate, time in
-            self?.handlePCMBuffer(buffer, sampleRate: sampleRate, time: time)
-        }
-        audioEngine.onError = { [weak self] error in
-            self?.notifyError(error)
-        }
     }
 
     @available(*, unavailable)
@@ -77,76 +75,75 @@ public final class SMSpectrumView: MTKView {
         fatalError("init(coder:) is not supported.")
     }
 
-    // MARK: - Lifecycle
+    // MARK: - Push API
 
-    public func start() {
-        guard !isRunning else { return }
-        do {
-            try audioEngine.start(source: source)
-            isRunning = true
-        } catch let error as SMError {
-            notifyError(error)
-        } catch {
-            notifyError(.audioEngineFailedToStart(underlying: error))
+    /// Pushes a single frame of band magnitudes for display. Magnitudes
+    /// should be 0...1 per band; lengths matching `configuration.bandCount`
+    /// render directly, mismatched lengths are treated as raw FFT half-bins
+    /// and remapped via the configuration's log-band layout.
+    ///
+    /// Smoothing (`SMConfiguration.smoothing` and `bandSmoothing`) is
+    /// applied internally before rendering.
+    ///
+    /// Safe to call from any thread.
+    public func push(
+        magnitudes: [Float],
+        timestamp: TimeInterval = CACurrentMediaTime()
+    ) {
+        push(frame: SMSpectrumFrame(magnitudes: magnitudes, timestamp: timestamp))
+    }
+
+    /// Pushes a fully-formed frame for display. `bandFrequencies` is
+    /// forwarded to the delegate; if empty, the view computes default Hz
+    /// values from the configuration.
+    ///
+    /// Safe to call from any thread.
+    public func push(frame incoming: SMSpectrumFrame) {
+        pushQueue.async { [weak self] in
+            self?.handle(incoming: incoming)
         }
-    }
-
-    public func pause() {
-        audioEngine.pause()
-        isRunning = false
-    }
-
-    public func stop() {
-        audioEngine.stop()
-        isRunning = false
-    }
-
-    /// Manually push a PCM buffer when `source == .manual`.
-    public func push(buffer: AVAudioPCMBuffer, sampleRate: Double, time: TimeInterval) {
-        handlePCMBuffer(buffer, sampleRate: sampleRate, time: time)
     }
 
     // MARK: - Plumbing
 
-    private func applyConfiguration() {
-        fftProcessor.fftSize = configuration.fftSize
-        frameBuilder.configuration = configuration
-    }
-
-    private func reloadSource() {
-        let wasRunning = isRunning
-        stop()
-        if wasRunning { start() }
-    }
-
-    private func handlePCMBuffer(_ buffer: AVAudioPCMBuffer, sampleRate: Double, time: TimeInterval) {
-        let magnitudes = fftProcessor.process(buffer: buffer, sampleRate: sampleRate)
-        let smoothed = frameBuilder.applySmoothing(magnitudes: magnitudes)
-        let bandFrequencies = frameBuilder.bandCenterFrequencies(sampleRate: Float(sampleRate))
+    private func handle(incoming: SMSpectrumFrame) {
+        let smoothed = frameBuilder.applySmoothing(magnitudes: incoming.magnitudes)
+        let frequencies = incoming.bandFrequencies.isEmpty
+            ? frameBuilder.bandCenterFrequencies(sampleRate: 44_100)
+            : incoming.bandFrequencies
 
         let publicFrame = SMSpectrumFrame(
             magnitudes: smoothed,
-            timestamp: time,
-            bandFrequencies: bandFrequencies
+            timestamp: incoming.timestamp,
+            bandFrequencies: frequencies
         )
         DispatchQueue.main.async { [weak self] in
-            guard let self = self else { return }
+            guard let self else { return }
             self.spectrumDelegate?.spectrumView(self, didProduce: publicFrame)
         }
 
-        let renderFrame = frameBuilder.makeRenderFrame(magnitudes: smoothed, timestamp: time)
+        let renderFrame = frameBuilder.makeRenderFrame(
+            magnitudes: smoothed,
+            timestamp: incoming.timestamp
+        )
         frameLock.lock()
         latestFrame = renderFrame
         frameLock.unlock()
     }
 
-    private func notifyError(_ error: SMError) {
+    private func applyConfiguration() {
+        frameBuilder.configuration = configuration
+    }
+
+    func notifyError(_ error: SMError) {
         DispatchQueue.main.async { [weak self] in
-            guard let self = self else { return }
+            guard let self else { return }
             self.spectrumDelegate?.spectrumView(self, didFailWith: error)
         }
     }
 }
+
+// MARK: - MTKViewDelegate
 
 extension SMSpectrumView: MTKViewDelegate {
 
@@ -159,7 +156,7 @@ extension SMSpectrumView: MTKViewDelegate {
         let frame = latestFrame
         frameLock.unlock()
 
-        guard let frame = frame,
+        guard let frame,
               let drawable = view.currentDrawable,
               let descriptor = view.currentRenderPassDescriptor else {
             return

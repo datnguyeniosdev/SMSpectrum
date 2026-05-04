@@ -145,6 +145,18 @@ extension SMConfiguration {
 }
 
 extension SMConfiguration {
+    /// Center frequency (Hz) of each band for a given sample rate, computed
+    /// from `bandCount` and `frequencyRange` using the same log-band layout
+    /// the audio engine uses internally. Useful when feeding the view
+    /// custom magnitudes — call this once to know which Hz each magnitude
+    /// slot corresponds to, then push your data with matching ordering.
+    public func bandCenterFrequencies(sampleRate: Float = 44_100) -> [Float] {
+        BandMapper(bandCount: bandCount, frequencyRange: frequencyRange)
+            .bandCenterFrequencies(sampleRate: sampleRate)
+    }
+}
+
+extension SMConfiguration {
     /// Converts this configuration into the renderer-side descriptor.
     func renderStyleDescriptor() -> RenderStyleDescriptor {
         RenderStyleDescriptor(
