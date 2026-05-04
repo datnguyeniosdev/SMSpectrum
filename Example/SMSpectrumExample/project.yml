@@ -1,0 +1,49 @@
+name: SMSpectrumExample
+options:
+  bundleIdPrefix: com.darrennguyen
+  deploymentTarget:
+    iOS: "14.0"
+  createIntermediateGroups: true
+
+packages:
+  SMSpectrum:
+    path: ../..
+
+targets:
+  SMSpectrumExample:
+    type: application
+    platform: iOS
+    sources:
+      - path: Sources
+    resources:
+      - path: Resources/Assets.xcassets
+    info:
+      path: Resources/Info.plist
+      properties:
+        CFBundleDisplayName: SMSpectrum
+        UILaunchScreen:
+          UIColorName: AccentColor
+        NSMicrophoneUsageDescription: SMSpectrum needs the microphone to visualize live audio.
+        UIRequiredDeviceCapabilities:
+          - metal
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.darrennguyen.smspectrum.example
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SWIFT_VERSION: "5.5"
+        IPHONEOS_DEPLOYMENT_TARGET: "14.0"
+        # Xcode 15.3+ splits the executable into a thin binary + `.debug.dylib`
+        # for SwiftUI Previews / hot-reload. The split causes "Library not
+        # loaded" code-signature failures when the .app is installed via
+        # `xcodebuild` + `simctl` (signature is tied to the original location).
+        # Disabling it produces a single conventional Mach-O.
+        ENABLE_DEBUG_DYLIB: "NO"
+    dependencies:
+      - package: SMSpectrum
+        product: SMSpectrum
+      - package: SMSpectrum
+        product: SMSpectrumRenderer
