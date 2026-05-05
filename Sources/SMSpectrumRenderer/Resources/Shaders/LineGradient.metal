@@ -18,7 +18,7 @@ struct Uniforms {
     float  rangeStart;
     float  rangeEnd;
     float  layerThickness;
-    float  _padding;
+    int    orientation;       // 0 = horizontal, 1 = vertical
 };
 
 struct VertexOut {
@@ -73,19 +73,26 @@ vertex VertexOut lineGradientVertex(uint vertexID [[vertex_id]],
     float magnitude = sampleSmoothMagnitude(magnitudes, u.bandCount, bandFloat);
     float displacement = magnitude * u.maxHeight;
 
-    float baselineY = u.viewportSize.y * 0.5;
-    float topY;
-    if (u.sideMode == 1) {
-        topY = baselineY + displacement;
-    } else {
-        topY = baselineY - displacement;
-    }
+    bool isVertical = (u.orientation == 1);
+    float bandAxisLen   = isVertical ? u.viewportSize.y : u.viewportSize.x;
+    float extendAxisLen = isVertical ? u.viewportSize.x : u.viewportSize.y;
+    float baseline = extendAxisLen * 0.5;
+    float dirSign = isVertical ? +1.0 : -1.0;
 
-    float layerWidth = u.rangeEnd - u.rangeStart;
-    float pixelX = (u.rangeStart + bandT * layerWidth) * u.viewportSize.x;
-    float pixelY = isTop ? topY : baselineY;
+    // `.both` is encoded by the pipeline as two draw calls (mode 0 + 1).
+    float topCoord = (u.sideMode == 1)
+        ? baseline - dirSign * displacement
+        : baseline + dirSign * displacement;
 
-    float2 ndc = float2(pixelX, pixelY) / u.viewportSize * 2.0 - 1.0;
+    float layerSpan = u.rangeEnd - u.rangeStart;
+    float bandPixel = (u.rangeStart + bandT * layerSpan) * bandAxisLen;
+    float extendPixel = isTop ? topCoord : baseline;
+
+    float2 pixel = isVertical
+        ? float2(extendPixel, bandPixel)
+        : float2(bandPixel, extendPixel);
+
+    float2 ndc = pixel / u.viewportSize * 2.0 - 1.0;
     ndc.y = -ndc.y;
 
     VertexOut out;

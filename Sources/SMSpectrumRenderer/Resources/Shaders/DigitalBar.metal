@@ -15,10 +15,10 @@ struct Uniforms {
     int    bandCount;
     int    stopCount;
     int    dynamicPhase;
-    float  rangeStart;       // 0..1 fraction of viewport width where layer starts
-    float  rangeEnd;         // 0..1 fraction of viewport width where layer ends
+    float  rangeStart;       // 0..1 fraction of band axis where layer starts
+    float  rangeEnd;         // 0..1 fraction of band axis where layer ends
     float  layerThickness;   // per-layer stroke
-    float  _padding;
+    int    orientation;      // 0 = horizontal (bands along X), 1 = vertical (bands along Y)
 };
 
 struct VertexOut {
@@ -73,21 +73,29 @@ vertex VertexOut digitalBarVertex(uint vertexID [[vertex_id]],
     float magnitude = sampleSmoothMagnitude(magnitudes, u.bandCount, bandFloat);
     float displacement = magnitude * u.maxHeight;
 
-    float centerY = u.viewportSize.y * 0.5;
-    float lineY;
-    if (u.sideMode == 0) {
-        lineY = centerY - displacement;
-    } else if (u.sideMode == 1) {
-        lineY = centerY + displacement;
-    } else {
-        lineY = centerY - displacement * sign(side);
-    }
+    // Resolve which screen axis is the band axis vs. the bar (extension) axis.
+    bool isVertical = (u.orientation == 1);
+    float bandAxisLen   = isVertical ? u.viewportSize.y : u.viewportSize.x;
+    float extendAxisLen = isVertical ? u.viewportSize.x : u.viewportSize.y;
 
-    float layerWidth = u.rangeEnd - u.rangeStart;
-    float pixelX = (u.rangeStart + bandT * layerWidth) * u.viewportSize.x;
-    float pixelY = lineY + side * u.layerThickness * 0.5;
+    float center = extendAxisLen * 0.5;
+    // sideMode 0 = sideA (top / right). sideMode 1 = sideB (bottom / left).
+    // The pipeline encodes `.both` as two draw calls (mode 0 + mode 1) so the
+    // shader only ever handles one side at a time.
+    float dirSign = isVertical ? +1.0 : -1.0;
+    float lineCoord = (u.sideMode == 1)
+        ? center - dirSign * displacement
+        : center + dirSign * displacement;
 
-    float2 ndc = float2(pixelX, pixelY) / u.viewportSize * 2.0 - 1.0;
+    float layerSpan = u.rangeEnd - u.rangeStart;
+    float bandPixel = (u.rangeStart + bandT * layerSpan) * bandAxisLen;
+    float extendPixel = lineCoord + side * u.layerThickness * 0.5;
+
+    float2 pixel = isVertical
+        ? float2(extendPixel, bandPixel)
+        : float2(bandPixel, extendPixel);
+
+    float2 ndc = pixel / u.viewportSize * 2.0 - 1.0;
     ndc.y = -ndc.y;
 
     VertexOut out;

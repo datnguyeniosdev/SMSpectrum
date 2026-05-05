@@ -24,6 +24,10 @@ public enum RenderStyle: Equatable {
     /// Filled area under the magnitude curve with a horizontal hue gradient
     /// and vertical alpha fade to baseline.
     case lineGradient
+
+    /// Circular stroke tracing magnitudes around a ring. Only the outer edge
+    /// is drawn — no fill, just a thick line with gradient coloring.
+    case circleLine
 }
 
 /// Side mirroring mode (matches After Effects' Side Options).
@@ -34,6 +38,15 @@ public enum RenderSideMode: Equatable {
     case sideB
     /// Mirrored on both sides.
     case both
+}
+
+/// Orientation of the band axis for line-based pipelines. Polar pipelines
+/// ignore this option.
+public enum RenderOrientation: Equatable {
+    /// Bands distributed along the X axis; bars extend along Y.
+    case horizontal
+    /// Bands distributed along the Y axis; bars extend along X.
+    case vertical
 }
 
 /// Color configuration consumed by the renderer.
@@ -103,6 +116,19 @@ public enum RenderPath: Equatable {
     case custom(CGPath)
 }
 
+/// Post-process bloom configuration consumed by the renderer.
+public struct RenderBloomFilter: Equatable {
+    public var intensity: Float
+    public var threshold: Float
+    public var radius: Float
+
+    public init(intensity: Float, threshold: Float, radius: Float) {
+        self.intensity = intensity
+        self.threshold = threshold
+        self.radius = radius
+    }
+}
+
 /// Aggregate visual configuration for a single render call.
 public struct RenderStyleDescriptor: Equatable {
     public var style: RenderStyle
@@ -127,6 +153,15 @@ public struct RenderStyleDescriptor: Equatable {
     /// descriptor-level `gradient` and `thickness`.
     public var layers: [RenderLayer]
 
+    /// When non-nil, the renderer draws the spectrum into an offscreen texture
+    /// and applies a separable gaussian bloom before compositing into the
+    /// drawable. Style-agnostic.
+    public var bloomFilter: RenderBloomFilter?
+
+    /// Orientation of the band axis for line-based pipelines. Polar pipelines
+    /// (`circleBars`, `circleHermite`) ignore this.
+    public var orientation: RenderOrientation
+
     public init(
         style: RenderStyle,
         path: RenderPath,
@@ -137,7 +172,9 @@ public struct RenderStyleDescriptor: Equatable {
         softness: Float,
         barSpacing: Float = 0,
         circleBaseRadius: CGFloat = 80,
-        layers: [RenderLayer] = []
+        layers: [RenderLayer] = [],
+        bloomFilter: RenderBloomFilter? = nil,
+        orientation: RenderOrientation = .horizontal
     ) {
         self.style = style
         self.path = path
@@ -149,6 +186,8 @@ public struct RenderStyleDescriptor: Equatable {
         self.barSpacing = barSpacing
         self.circleBaseRadius = circleBaseRadius
         self.layers = layers
+        self.bloomFilter = bloomFilter
+        self.orientation = orientation
     }
 }
 
@@ -159,7 +198,7 @@ extension RenderStyleDescriptor {
     /// thickness.
     public var effectiveLayers: [RenderLayer] {
         if !layers.isEmpty { return layers }
-        let isCircleStyle = (style == .circleBars || style == .circleHermite)
+        let isCircleStyle = (style == .circleBars || style == .circleHermite || style == .circleLine)
         let range: ClosedRange<CGFloat> = isCircleStyle
             ? 0...(.pi * 2)
             : 0...1

@@ -74,24 +74,29 @@ final class AnalogDotPipeline: SpectrumPipeline {
                     ? Float(frame.timestamp) * layer.gradient.phaseSpeed
                     : 0,
                 barSpacing: frame.style.barSpacing,
-                sideMode: SpectrumUniforms.sideModeRaw(frame.style.sideMode),
+                sideMode: 0,
                 bandCount: Int32(frame.magnitudes.count),
                 stopCount: Int32(stops.count),
                 dynamicPhase: layer.gradient.dynamicPhase ? 1 : 0,
                 rangeStart: Float(layer.range.lowerBound),
                 rangeEnd: Float(layer.range.upperBound),
-                layerThickness: Float(layer.thickness)
+                layerThickness: Float(layer.thickness),
+                orientation: SpectrumUniforms.orientationRaw(frame.style.orientation)
             )
 
-            encoder.setVertexBytes(&uniforms, length: MemoryLayout<SpectrumUniforms>.stride, index: 1)
             encoder.setFragmentBuffer(stopBuffer, offset: 0, index: 0)
-            encoder.setFragmentBytes(&uniforms, length: MemoryLayout<SpectrumUniforms>.stride, index: 1)
-            encoder.drawPrimitives(
-                type: .triangleStrip,
-                vertexStart: 0,
-                vertexCount: 4,
-                instanceCount: frame.magnitudes.count
-            )
+
+            for sideRaw in SpectrumUniforms.sideModeDrawRaws(frame.style.sideMode) {
+                uniforms.sideMode = sideRaw
+                encoder.setVertexBytes(&uniforms, length: MemoryLayout<SpectrumUniforms>.stride, index: 1)
+                encoder.setFragmentBytes(&uniforms, length: MemoryLayout<SpectrumUniforms>.stride, index: 1)
+                encoder.drawPrimitives(
+                    type: .triangleStrip,
+                    vertexStart: 0,
+                    vertexCount: 4,
+                    instanceCount: frame.magnitudes.count
+                )
+            }
         }
     }
 }

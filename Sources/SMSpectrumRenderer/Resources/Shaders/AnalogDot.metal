@@ -16,7 +16,7 @@ struct Uniforms {
     float  rangeStart;
     float  rangeEnd;
     float  layerThickness;
-    float  _padding;
+    int    orientation;       // 0 = horizontal, 1 = vertical
 };
 
 struct VertexOut {
@@ -48,21 +48,30 @@ vertex VertexOut analogDotVertex(uint vertexID [[vertex_id]],
     float magnitude = clamp(magnitudes[instanceID], 0.0, 1.0);
     float bandT = float(instanceID) / max(float(u.bandCount - 1), 1.0);
     float radius = max(u.layerThickness, 1.0);
-
-    float layerWidth = u.rangeEnd - u.rangeStart;
-    float pixelX = (u.rangeStart + bandT * layerWidth) * u.viewportSize.x;
     float displacement = magnitude * u.maxHeight;
-    float centerY = u.viewportSize.y * 0.5;
-    float pixelY;
-    if (u.sideMode == 0) {
-        pixelY = centerY - displacement;
-    } else if (u.sideMode == 1) {
-        pixelY = centerY + displacement;
+
+    bool isVertical = (u.orientation == 1);
+    float bandAxisLen   = isVertical ? u.viewportSize.y : u.viewportSize.x;
+    float extendAxisLen = isVertical ? u.viewportSize.x : u.viewportSize.y;
+    float center = extendAxisLen * 0.5;
+    float dirSign = isVertical ? +1.0 : -1.0;
+
+    // `.both` is encoded by the pipeline as two draw calls (mode 0 + 1).
+    float coord;
+    if (u.sideMode == 1) {
+        coord = center - dirSign * displacement;
     } else {
-        pixelY = centerY - displacement;
+        coord = center + dirSign * displacement;
     }
 
-    float2 pixel = float2(pixelX, pixelY) + centered * radius * 2.0;
+    float layerSpan = u.rangeEnd - u.rangeStart;
+    float bandPixel = (u.rangeStart + bandT * layerSpan) * bandAxisLen;
+
+    float2 dotCenter = isVertical
+        ? float2(coord, bandPixel)
+        : float2(bandPixel, coord);
+
+    float2 pixel = dotCenter + centered * radius * 2.0;
     float2 ndc = pixel / u.viewportSize * 2.0 - 1.0;
     ndc.y = -ndc.y;
 

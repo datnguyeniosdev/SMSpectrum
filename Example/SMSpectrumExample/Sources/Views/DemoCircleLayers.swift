@@ -17,24 +17,21 @@ enum DemoCircleLayers {
     /// audio bumps (`maxHeight` ~25pt) read as ~25% of the ring rather than
     /// dominating the silhouette, so the visual stays "circle with waves"
     /// instead of "amorphous blob".
-    static let baseRadius: CGFloat = 90
+    static let baseRadius: CGFloat = 150
 
     /// Half circle split into two equal quadrants. Demonstrates partial-arc
     /// rendering cleanly — only the right half of the ring is drawn.
     static let quadrants: [SMLayer] = {
         let twoPi = CGFloat.pi * 2
         return [
-            SMLayer(range: 0...(twoPi * 0.25),               gradient: .rainbow,    thickness: 2),
-            SMLayer(range: (twoPi * 0.25)...(twoPi * 0.5),   gradient: .warmSunset, thickness: 2),
-//          SMLayer(range: (twoPi * 0.5)...(twoPi * 0.75),   gradient: .cyanMagenta, thickness: 2),
-//          SMLayer(range: (twoPi * 0.75)...twoPi,           gradient: .rainbow,     thickness: 2)
+            SMLayer(range: 0...twoPi,   gradient: .cyanMagenta, thickness: 0.8),
         ]
     }()
 
     /// 40 thin curves stacked with small radial + phase offsets, producing
     /// the woven cyan/violet ribbon glow seen in the reference design.
     static let ribbon: [SMLayer] = SMLayer.circleRibbon(
-        count: 40,
+        count: 8,
         radialSpread: 18,        // narrow ribbon band (≈20% of baseRadius)
         phaseSpread: 0.45,
         gradient: ribbonGradient,

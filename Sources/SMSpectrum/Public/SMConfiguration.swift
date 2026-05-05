@@ -41,6 +41,38 @@ public struct SMConfiguration: Equatable {
     /// the full path once with the config-level gradient/thickness".
     public var layers: [SMLayer]
 
+    /// Optional post-process bloom filter. When non-nil, the spectrum is
+    /// drawn into an offscreen texture and a gaussian bloom is composited
+    /// on top before reaching the drawable. Style-agnostic.
+    public var bloomFilter: SMBloomFilter?
+
+    /// Mirror + taper for circle styles (0...1). When > 0, the magnitude
+    /// array is mirrored into `[low...high...low]` then a smooth taper is
+    /// applied to both ends: `circleMirror / 2` fraction at the start and
+    /// `circleMirror / 2` fraction at the end fade from/to zero via a
+    /// smoothstep curve. The middle `1 - circleMirror` portion passes through
+    /// untouched. 0 = off (linear band distribution). Ignored by non-circle
+    /// styles. For example, 0.4 means 20 % taper at each end, 60 % real in
+    /// the middle.
+    public var circleMirror: Float
+
+    /// Rotates the mirrored spectrum around the circle (0...1, normalized).
+    /// 0 = low frequencies at 0°/360° seam, high frequencies at 180°.
+    /// 0.5 = high frequencies at the seam, low frequencies opposite.
+    /// Ignored when `circleMirror == 0` or style is not `.circle`.
+    public var circleMirrorPhase: Float
+
+    /// Maximum number of visible peaks on the circle when `circleMirror > 0`
+    /// (1…6). Fewer peaks will appear if the audio doesn't produce enough
+    /// strong frequency clusters.
+    public var circleMirrorPeaks: Int
+
+    /// Orientation of the band axis for line-based styles. Default
+    /// `.horizontal` (bands left → right). Set `.vertical` to run bands
+    /// top → bottom with bars extending horizontally. Circle styles ignore
+    /// this option.
+    public var orientation: SMOrientation
+
     public init(
         style: SMStyle,
         frequencyRange: ClosedRange<Float> = 20...20_000,
@@ -57,12 +89,20 @@ public struct SMConfiguration: Equatable {
         barSpacing: Float = 0,
         circleMode: SMCircleMode = .bars,
         circleBaseRadius: CGFloat = 80,
-        layers: [SMLayer] = []
+        layers: [SMLayer] = [],
+        bloomFilter: SMBloomFilter? = nil,
+        circleMirror: Float = 0,
+        circleMirrorPhase: Float = 0,
+        circleMirrorPeaks: Int = 4,
+        orientation: SMOrientation = .horizontal
     ) {
         precondition(bandCount >= 8 && bandCount <= 1024, "bandCount out of range.")
         precondition(frequencyRange.lowerBound > 0, "frequencyRange must be positive.")
         precondition((0...1).contains(bandSmoothing), "bandSmoothing must be in 0...1.")
         precondition((0...1).contains(barSpacing), "barSpacing must be in 0...1.")
+        precondition((0...1).contains(circleMirror), "circleMirror must be in 0...1.")
+        precondition((0...1).contains(circleMirrorPhase), "circleMirrorPhase must be in 0...1.")
+        precondition((1...6).contains(circleMirrorPeaks), "circleMirrorPeaks must be in 1...6.")
         self.style = style
         self.frequencyRange = frequencyRange
         self.bandCount = bandCount
@@ -79,6 +119,11 @@ public struct SMConfiguration: Equatable {
         self.circleMode = circleMode
         self.circleBaseRadius = circleBaseRadius
         self.layers = layers
+        self.bloomFilter = bloomFilter
+        self.circleMirror = circleMirror
+        self.circleMirrorPhase = circleMirrorPhase
+        self.circleMirrorPeaks = circleMirrorPeaks
+        self.orientation = orientation
     }
 }
 
@@ -118,6 +163,58 @@ extension SMConfiguration {
         bandSmoothing: 0.7
     )
 
+    /// Symmetric circle bars with mirror + Tukey window (peak at 9 o'clock,
+    /// 25 % taper) and a subtle bloom glow. High frequencies cluster in the
+    /// middle of the arc; low frequencies fade at the 0°/360° seam.
+    public static let circleMirrored = SMConfiguration(
+        style: .circle,
+        bandCount: 128,
+        maxHeight: 120,
+        thickness: 1.5,
+        softness: 0.5,
+        path: .circle(center: CGPoint(x: 0.5, y: 0.5), radius: 0.4),
+        gradient: .cyanMagenta,
+        sideMode: .sideA,
+        smoothing: .silky,
+        bandSmoothing: 0.6,
+        circleMode: .bars,
+        circleBaseRadius: 100,
+        bloomFilter: SMBloomFilter(intensity: 0.5, threshold: 0.3, radius: 12),
+        circleMirror: 0.25,
+        circleMirrorPhase: 0
+    )
+
+    /// Symmetric circle Cubic Hermite curve with mirror + Tukey window
+    /// (peak at 9 o'clock, 25 % taper) and bloom glow. A single smooth ring
+    /// curve with one visible peak — clean circular silhouette.
+    public static let circleHermiteMirrored: SMConfiguration = {
+        let twoPi = CGFloat.pi * 2
+        return SMConfiguration(
+            style: .circle,
+            bandCount: 128,
+            maxHeight: 80,
+            thickness: 0,
+            softness: 0.5,
+            path: .circle(center: CGPoint(x: 0.5, y: 0.5), radius: 0.4),
+            gradient: .cyanMagenta,
+            sideMode: .sideA,
+            smoothing: .silky,
+            bandSmoothing: 0.6,
+            circleMode: .cubicHermite,
+            circleBaseRadius: 130,
+            layers: [
+                SMLayer(
+                    range: 0...twoPi,
+                    gradient: .cyanMagenta,
+                    thickness: 1.5
+                )
+            ],
+            bloomFilter: SMBloomFilter(intensity: 0.5, threshold: 0.3, radius: 12),
+            circleMirror: 0.25,
+            circleMirrorPhase: 0
+        )
+    }()
+
     public static let lineGradient = SMConfiguration(
         style: .lineGradient,
         bandCount: 128,
@@ -127,6 +224,22 @@ extension SMConfiguration {
         sideMode: .sideA,
         smoothing: .silky,
         bandSmoothing: 0.7
+    )
+
+    /// Circular stroke only — no fill, just a thick line tracing magnitudes
+    /// around the ring with gradient coloring.
+    public static let circleLine = SMConfiguration(
+        style: .circleLine,
+        bandCount: 128,
+        maxHeight: 80,
+        thickness: 2,
+        softness: 0.4,
+        path: .circle(center: CGPoint(x: 0.5, y: 0.5), radius: 0.4),
+        gradient: .cyanMagenta,
+        sideMode: .sideA,
+        smoothing: .silky,
+        bandSmoothing: 0.6,
+        circleBaseRadius: 120
     )
 
     /// Time-domain-style waveform: thin solid line on a flat baseline with
@@ -169,7 +282,15 @@ extension SMConfiguration {
             softness: softness,
             barSpacing: barSpacing,
             circleBaseRadius: circleBaseRadius,
-            layers: layers.map { $0.renderLayer() }
+            layers: layers.map { $0.renderLayer() },
+            bloomFilter: bloomFilter.map {
+                RenderBloomFilter(
+                    intensity: $0.intensity,
+                    threshold: $0.threshold,
+                    radius: $0.radius
+                )
+            },
+            orientation: orientation.renderOrientation
         )
     }
 }

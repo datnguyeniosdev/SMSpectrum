@@ -2,20 +2,38 @@ import Foundation
 import Metal
 import simd
 
-/// AE-style audio spectrum on a circular path. Each layer occupies an arc
-/// `[rangeStart, rangeEnd]` (radians) on the same baseline ring; the layer's
-/// `bandCount` wedges fill that arc, with the layer's gradient sweeping
-/// across them.
-final class CircleBarPipeline: SpectrumPipeline {
+private struct CircleLineUniforms {
+    var viewportSize: SIMD2<Float>
+    var time: Float
+    var baseRadius: Float
+    var maxHeight: Float
+    var startAngle: Float
+    var endAngle: Float
+    var softness: Float
+    var phase: Float
+    var bandCount: Int32
+    var stopCount: Int32
+    var dynamicPhase: Int32
+    var layerThickness: Float
+}
+
+/// Renders the spectrum as a circular stroke — thick line tracing the outer
+/// edge of the magnitude curve around a ring. No fill, just the line, with
+/// wrapped Catmull-Rom interpolation for a smooth closed curve.
+/// Iterates `effectiveLayers` so each layer can cover its own arc with its
+/// own gradient and thickness.
+final class CircleLinePipeline: SpectrumPipeline {
+
+    static let tessellationFactor: Int = 6
 
     private let pipelineState: MTLRenderPipelineState
 
     init(library: PipelineLibrary, pixelFormat: MTLPixelFormat) throws {
-        let vertex = try library.makeFunction(named: "circleBarVertex")
-        let fragment = try library.makeFunction(named: "circleBarFragment")
+        let vertex = try library.makeFunction(named: "circleLineVertex")
+        let fragment = try library.makeFunction(named: "circleLineFragment")
 
         let descriptor = MTLRenderPipelineDescriptor()
-        descriptor.label = "SMSpectrum.CircleBar"
+        descriptor.label = "SMSpectrum.CircleLine"
         descriptor.vertexFunction = vertex
         descriptor.fragmentFunction = fragment
         descriptor.colorAttachments[0].pixelFormat = pixelFormat
@@ -30,7 +48,10 @@ final class CircleBarPipeline: SpectrumPipeline {
         do {
             self.pipelineState = try library.device.makeRenderPipelineState(descriptor: descriptor)
         } catch {
-            throw RenderError.pipelineCreationFailed(stage: "CircleBar.pipelineState", underlying: error)
+            throw RenderError.pipelineCreationFailed(
+                stage: "CircleLine.pipelineState",
+                underlying: error
+            )
         }
     }
 
@@ -40,15 +61,18 @@ final class CircleBarPipeline: SpectrumPipeline {
         bufferPool: BufferPool,
         encoder: MTLRenderCommandEncoder
     ) throws {
-        guard !frame.magnitudes.isEmpty else {
-            throw RenderError.invalidFrame(reason: "CircleBar requires non-empty magnitudes.")
+        guard frame.magnitudes.count >= 2 else {
+            throw RenderError.invalidFrame(reason: "CircleLine requires at least 2 magnitudes.")
         }
         let layers = frame.style.effectiveLayers
 
         bufferPool.advance()
 
         let magnitudeByteCount = MemoryLayout<Float>.stride * frame.magnitudes.count
-        let magnitudeBuffer = try bufferPool.buffer(forKey: "CircleBar.magnitudes", byteCount: magnitudeByteCount)
+        let magnitudeBuffer = try bufferPool.buffer(
+            forKey: "CircleLine.magnitudes",
+            byteCount: magnitudeByteCount
+        )
         _ = frame.magnitudes.withUnsafeBufferPointer { ptr in
             memcpy(magnitudeBuffer.contents(), ptr.baseAddress, magnitudeByteCount)
         }
@@ -56,46 +80,44 @@ final class CircleBarPipeline: SpectrumPipeline {
         encoder.setRenderPipelineState(pipelineState)
         encoder.setVertexBuffer(magnitudeBuffer, offset: 0, index: 0)
 
+        let totalSamples = max(frame.magnitudes.count * Self.tessellationFactor, 3)
+        let vertexCount = (totalSamples + 1) * 2
+
         for (layerIndex, layer) in layers.enumerated() {
             let stops = layer.gradient.stops
             let stopByteCount = MemoryLayout<SIMD4<Float>>.stride * stops.count
             let stopBuffer = try bufferPool.buffer(
-                forKey: "CircleBar.stops.\(layerIndex)",
+                forKey: "CircleLine.stops.\(layerIndex)",
                 byteCount: stopByteCount
             )
             _ = stops.withUnsafeBufferPointer { ptr in
                 memcpy(stopBuffer.contents(), ptr.baseAddress, stopByteCount)
             }
 
-            var uniforms = SpectrumUniforms(
+            var uniforms = CircleLineUniforms(
                 viewportSize: viewportSize,
                 time: Float(frame.timestamp),
+                baseRadius: Float(frame.style.circleBaseRadius + layer.radialOffset),
                 maxHeight: Float(frame.style.maxHeight),
-                thickness: Float(frame.style.thickness),
+                startAngle: Float(layer.range.lowerBound),
+                endAngle: Float(layer.range.upperBound),
                 softness: frame.style.softness,
                 phase: layer.gradient.dynamicPhase
                     ? Float(frame.timestamp) * layer.gradient.phaseSpeed
                     : 0,
-                barSpacing: frame.style.barSpacing,
-                sideMode: SpectrumUniforms.sideModeRaw(frame.style.sideMode),
                 bandCount: Int32(frame.magnitudes.count),
                 stopCount: Int32(stops.count),
                 dynamicPhase: layer.gradient.dynamicPhase ? 1 : 0,
-                rangeStart: Float(layer.range.lowerBound),
-                rangeEnd: Float(layer.range.upperBound),
-                layerThickness: Float(layer.thickness),
-                orientation: SpectrumUniforms.orientationRaw(frame.style.orientation)
+                layerThickness: Float(layer.thickness)
             )
 
-            encoder.setVertexBytes(&uniforms, length: MemoryLayout<SpectrumUniforms>.stride, index: 1)
+            encoder.setVertexBytes(&uniforms, length: MemoryLayout<CircleLineUniforms>.stride, index: 1)
             encoder.setFragmentBuffer(stopBuffer, offset: 0, index: 0)
-            encoder.setFragmentBytes(&uniforms, length: MemoryLayout<SpectrumUniforms>.stride, index: 1)
-
+            encoder.setFragmentBytes(&uniforms, length: MemoryLayout<CircleLineUniforms>.stride, index: 1)
             encoder.drawPrimitives(
                 type: .triangleStrip,
                 vertexStart: 0,
-                vertexCount: 4,
-                instanceCount: frame.magnitudes.count
+                vertexCount: vertexCount
             )
         }
     }

@@ -43,7 +43,7 @@ struct SpectrumUniforms {
     var rangeStart: Float            // 48..52
     var rangeEnd: Float              // 52..56
     var layerThickness: Float        // 56..60
-    var _padding: Float = 0          // 60..64
+    var orientation: Int32 = 0       // 60..64  (0 = horizontal, 1 = vertical)
 }
 
 extension SpectrumUniforms {
@@ -53,6 +53,26 @@ extension SpectrumUniforms {
         case .sideA: return 0
         case .sideB: return 1
         case .both: return 2
+        }
+    }
+
+    /// Maps a `RenderOrientation` to its shader-side integer code.
+    static func orientationRaw(_ orientation: RenderOrientation) -> Int32 {
+        switch orientation {
+        case .horizontal: return 0
+        case .vertical: return 1
+        }
+    }
+
+    /// Per-draw sideMode raws for a `RenderSideMode`. `.both` expands to
+    /// `[0, 1]` so pipelines issue two draws (sideA + sideB) for a true
+    /// symmetric mirror, instead of asking the shader to handle "both" as
+    /// a single mode.
+    static func sideModeDrawRaws(_ mode: RenderSideMode) -> [Int32] {
+        switch mode {
+        case .sideA: return [0]
+        case .sideB: return [1]
+        case .both:  return [0, 1]
         }
     }
 }

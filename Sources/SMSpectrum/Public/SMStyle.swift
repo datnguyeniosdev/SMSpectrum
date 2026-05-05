@@ -10,6 +10,11 @@ public enum SMStyle: Equatable {
     case circle
     case lineGradient
 
+    /// Circular stroke tracing magnitudes around a ring — outer edge only,
+    /// no fill. Uses the circle-line pipeline with smooth Catmull-Rom
+    /// interpolation along the arc.
+    case circleLine
+
     /// Single-sided thin polyline above the baseline. Visually similar to a
     /// time-domain waveform — flat at silence with sharp peaks for transients.
     /// Internally reuses the analog-line pipeline with snappy smoothing.
@@ -31,6 +36,7 @@ extension SMStyle {
             case .cubicHermite: return .circleHermite
             }
         case .lineGradient: return .lineGradient
+        case .circleLine: return .circleLine
         case .waveform: return .analogLines
         }
     }

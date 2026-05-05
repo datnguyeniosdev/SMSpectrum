@@ -6,8 +6,17 @@ struct AudioFileDemoView: View {
 
     @State private var style: SMStyle = .analogLines
     @State private var bandCount: Double = 64
-    @State private var softness: Double = 0.4
+    @State private var softness: Double = 0.6
     @State private var circleMode: SMCircleMode = .cubicHermite
+    @State private var orientation: SMOrientation = .horizontal
+    @State private var sideMode: SMSide = .both
+    @State private var bloomEnabled: Bool = true
+    @State private var bloomIntensity: Double = 0.8
+    @State private var bloomThreshold: Double = 0.4
+    @State private var bloomRadius: Double = 14
+    @State private var circleMirror: Double = 0.25
+    @State private var circleMirrorPhase: Double = 0
+    @State private var circularTemplate: CircularTemplate = .off
     @State private var selectedURL: URL? = Bundle.main.url(forResource: "demo", withExtension: "mp3")
     @State private var fileName: String?
     @State private var isImporterPresented = false
@@ -46,7 +55,16 @@ struct AudioFileDemoView: View {
                 style: $style,
                 bandCount: $bandCount,
                 softness: $softness,
-                circleMode: $circleMode
+                circleMode: $circleMode,
+                orientation: $orientation,
+                sideMode: $sideMode,
+                bloomEnabled: $bloomEnabled,
+                bloomIntensity: $bloomIntensity,
+                bloomThreshold: $bloomThreshold,
+                bloomRadius: $bloomRadius,
+                circleMirror: $circleMirror,
+                circleMirrorPhase: $circleMirrorPhase,
+                circularTemplate: $circularTemplate
             )
 
             if let errorMessage {
@@ -70,17 +88,33 @@ struct AudioFileDemoView: View {
     }
 
     private var configuration: SMConfiguration {
+        let isCircleBars = (style == .circle && circleMode == .bars)
         let isCircleHermite = (style == .circle && circleMode == .cubicHermite)
+        let isCircleLine = (style == .circleLine)
+        let twoPi = CGFloat.pi * 2
         return SMConfiguration(
             style: style,
             bandCount: Int(bandCount),
-            maxHeight: isCircleHermite ? 22 : 60,
+            maxHeight: isCircleHermite ? 200 : (isCircleBars ? 80 : (isCircleLine ? 80 : 60)),
+            thickness: isCircleBars ? 2 : 6,
             softness: Float(softness),
+            sideMode: sideMode,
             smoothing: .silky,
             bandSmoothing: 0.7,
             circleMode: circleMode,
-            circleBaseRadius: DemoCircleLayers.baseRadius,
-            layers: isCircleHermite ? DemoCircleLayers.ribbon : []
+            circleBaseRadius: isCircleLine ? 130 : DemoCircleLayers.baseRadius,
+            layers: isCircleHermite ? DemoCircleLayers.quadrants
+                : (isCircleLine ? [SMLayer(range: 0...twoPi, gradient: .cyanMagenta, thickness: 1.8)] : []),
+            bloomFilter: bloomEnabled
+                ? SMBloomFilter(
+                    intensity: Float(bloomIntensity),
+                    threshold: Float(bloomThreshold),
+                    radius: Float(bloomRadius)
+                )
+                    : nil,
+            circleMirror: Float(circleMirror),
+            circleMirrorPhase: Float(circleMirrorPhase),
+            orientation: orientation
         )
     }
 
