@@ -2,7 +2,7 @@
 
 A high-performance audio spectrum visualization SDK for iOS, inspired by Adobe After Effects' Audio Spectrum effect. Powered by Metal and Accelerate.
 
-▶️ **[Watch Demo Video](demo.mov)**
+▶️ **[Watch Demo Video](demo.gif)**
 
 > Version **0.1.0** — realtime audio visualization with symmetric circle support, peak animation, and timeline overlay.
 
