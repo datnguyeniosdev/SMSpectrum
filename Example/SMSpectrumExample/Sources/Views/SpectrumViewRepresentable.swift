@@ -10,10 +10,12 @@ struct SpectrumViewRepresentable: UIViewRepresentable {
 
     let source: SMSource
     let configuration: SMConfiguration
+    var onBassLevel: ((Float) -> Void)? = nil
+    var onSpectrum: ((Float, Float, Float) -> Void)? = nil
     var onError: ((SMError) -> Void)? = nil
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(onError: onError)
+        Coordinator(onError: onError, onBassLevel: onBassLevel, onSpectrum: onSpectrum)
     }
 
     func makeUIView(context: Context) -> SMSpectrumView {
@@ -46,12 +48,16 @@ struct SpectrumViewRepresentable: UIViewRepresentable {
     final class Coordinator: NSObject, SMSpectrumViewDelegate {
 
         let onError: ((SMError) -> Void)?
+        let onBassLevel: ((Float) -> Void)?
+        let onSpectrum: ((Float, Float, Float) -> Void)?
         private weak var view: SMSpectrumView?
         private var driver: SMAudioSpectrumDriver?
         private var lastSource: SMSource?
 
-        init(onError: ((SMError) -> Void)?) {
+        init(onError: ((SMError) -> Void)?, onBassLevel: ((Float) -> Void)?, onSpectrum: ((Float, Float, Float) -> Void)?) {
             self.onError = onError
+            self.onBassLevel = onBassLevel
+            self.onSpectrum = onSpectrum
         }
 
         func attach(view: SMSpectrumView, source: SMSource, configuration: SMConfiguration) {
@@ -73,10 +79,14 @@ struct SpectrumViewRepresentable: UIViewRepresentable {
 
         // MARK: - SMSpectrumViewDelegate
 
-        func spectrumView(_ view: SMSpectrumView, didProduce frame: SMSpectrumFrame) {
-            // Demo doesn't use the analysis output, but this hook is where you
-            // would forward `frame.magnitudes` / `frame.bandFrequencies` to
-            // your own analytics, recording, etc.
+        func spectrumView(_ view: SMSpectrumView, didProduce frame: SMSpectrumFrame) {}
+
+        func spectrumView(_ view: SMSpectrumView, didUpdateBassLevel level: Float) {
+            onBassLevel?(level)
+        }
+
+        func spectrumView(_ view: SMSpectrumView, didUpdateSpectrum bass: Float, mid: Float, treble: Float) {
+            onSpectrum?(bass, mid, treble)
         }
 
         func spectrumView(_ view: SMSpectrumView, didFailWith error: SMError) {
@@ -91,6 +101,9 @@ struct SpectrumViewRepresentable: UIViewRepresentable {
             driver.attach(to: view)
             driver.onError = { [weak self] error in
                 self?.onError?(error)
+            }
+            driver.onPlaybackProgress = { [weak view] progress in
+                view?.timelineProgress = CGFloat(progress)
             }
             do {
                 try driver.start(source: source)

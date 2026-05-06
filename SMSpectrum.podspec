@@ -1,7 +1,7 @@
 Pod::Spec.new do |s|
   s.name             = 'SMSpectrum'
-  s.version          = '1.0.0'
-  s.summary          = 'High-performance audio spectrum visualization for iOS, powered by Metal.'
+  s.version          = '0.1.0'
+  s.summary          = 'High-performance audio spectrum visualization for iOS — Metal + Accelerate.'
   s.description      = <<-DESC
     SMSpectrum is an audio spectrum visualization SDK inspired by Adobe After Effects'
     Audio Spectrum effect. It provides realtime FFT analysis via Accelerate and renders

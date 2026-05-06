@@ -8,6 +8,7 @@ final class AudioEngine {
 
     var onPCMBuffer: ((AVAudioPCMBuffer, Double, TimeInterval) -> Void)?
     var onError: ((SMError) -> Void)?
+    var onPlaybackProgress: ((Float) -> Void)?
 
     private let engine = AVAudioEngine()
     private var playerNode: AVAudioPlayerNode?
@@ -96,7 +97,15 @@ final class AudioEngine {
             guard let self = self else { return }
             let now = CFAbsoluteTimeGetCurrent() - self.sourceStartTime
             self.onPCMBuffer?(buffer, format.sampleRate, now)
-            _ = time
+
+            if let player = self.playerNode, let file = self.audioFile {
+                if let nodeTime = player.lastRenderTime,
+                   let playerTime = player.playerTime(forNodeTime: nodeTime) {
+                    let current = Double(playerTime.sampleTime) / playerTime.sampleRate
+                    let total = Double(file.length) / file.processingFormat.sampleRate
+                    self.onPlaybackProgress?(Float(current / total))
+                }
+            }
         }
         tappedNode = node
     }

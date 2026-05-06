@@ -40,6 +40,17 @@ public final class SMSpectrumView: MTKView {
         didSet { applyConfiguration() }
     }
 
+    /// Song playback progress, 0…1. Drives a thin inner ring timeline
+    /// that fills clockwise inside the circle. Set to nil to hide.
+    public var timelineProgress: CGFloat? {
+        didSet { updateTimelineRing() }
+    }
+
+    /// Color of the inner timeline ring. Default white at 60 % opacity.
+    public var timelineColor: CGColor = CGColor(red: 1, green: 1, blue: 1, alpha: 0.6) {
+        didSet { timelineLayer.strokeColor = timelineColor }
+    }
+
     // MARK: - Internal services
 
     private let renderer: SpectrumRenderer
@@ -48,6 +59,10 @@ public final class SMSpectrumView: MTKView {
 
     private var latestFrame: RenderFrame?
     private let frameLock = NSLock()
+
+    // MARK: - Timeline ring
+
+    private let timelineLayer = CAShapeLayer()
 
     // MARK: - Init
 
@@ -68,11 +83,43 @@ public final class SMSpectrumView: MTKView {
         super.init(frame: frame, device: renderer.device)
         renderer.attach(to: self)
         delegate = self
+        setupTimelineLayer()
     }
 
     @available(*, unavailable)
     public required init(coder: NSCoder) {
         fatalError("init(coder:) is not supported.")
+    }
+
+    // MARK: - Timeline
+
+    private func setupTimelineLayer() {
+        timelineLayer.fillColor = nil
+        timelineLayer.strokeColor = timelineColor
+        timelineLayer.lineWidth = 2.5
+        timelineLayer.lineCap = .round
+        timelineLayer.strokeEnd = 0
+        #if canImport(UIKit)
+        layer.addSublayer(timelineLayer)
+        #else
+        layer?.addSublayer(timelineLayer)
+        #endif
+        updateTimelineRing()
+    }
+
+    private func updateTimelineRing() {
+        let size = min(bounds.width, bounds.height)
+        let radius = size * 0.27
+        let path = CGMutablePath()
+        path.addArc(
+            center: CGPoint(x: bounds.midX, y: bounds.midY),
+            radius: radius,
+            startAngle: -.pi / 2,
+            endAngle: .pi * 1.5,
+            clockwise: true
+        )
+        timelineLayer.path = path
+        timelineLayer.strokeEnd = timelineProgress ?? 0
     }
 
     // MARK: - Push API
@@ -120,6 +167,10 @@ public final class SMSpectrumView: MTKView {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.spectrumDelegate?.spectrumView(self, didProduce: publicFrame)
+            let bass = self.computeBassEnergy(smoothed)
+            self.spectrumDelegate?.spectrumView(self, didUpdateBassLevel: bass)
+            let (b, m, t) = self.computeSpectrumBands(smoothed)
+            self.spectrumDelegate?.spectrumView(self, didUpdateSpectrum: b, mid: m, treble: t)
         }
 
         let renderFrame = frameBuilder.makeRenderFrame(
@@ -135,6 +186,27 @@ public final class SMSpectrumView: MTKView {
         frameBuilder.configuration = configuration
     }
 
+    /// Bass energy from the lowest 20 % of bands, averaged.
+    private func computeBassEnergy(_ magnitudes: [Float]) -> Float {
+        guard !magnitudes.isEmpty else { return 0 }
+        let bassCount = max(1, magnitudes.count / 5)
+        let bassSlice = magnitudes.prefix(bassCount)
+        return bassSlice.reduce(0, +) / Float(bassSlice.count)
+    }
+
+    /// Splits magnitudes into bass (0–15 %), mid (15–50 %), treble (50–100 %).
+    private func computeSpectrumBands(_ magnitudes: [Float]) -> (Float, Float, Float) {
+        guard !magnitudes.isEmpty else { return (0, 0, 0) }
+        let n = magnitudes.count
+        let bassEnd = max(1, n * 15 / 100)
+        let midEnd  = max(bassEnd + 1, n * 50 / 100)
+        return (
+            magnitudes[0..<bassEnd].reduce(0, +) / Float(bassEnd),
+            magnitudes[bassEnd..<midEnd].reduce(0, +) / Float(midEnd - bassEnd),
+            magnitudes[midEnd..<n].reduce(0, +) / Float(n - midEnd)
+        )
+    }
+
     func notifyError(_ error: SMError) {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
@@ -148,7 +220,7 @@ public final class SMSpectrumView: MTKView {
 extension SMSpectrumView: MTKViewDelegate {
 
     public func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {
-        // No-op; pipelines read viewport per draw.
+        updateTimelineRing()
     }
 
     public func draw(in view: MTKView) {
@@ -161,6 +233,8 @@ extension SMSpectrumView: MTKViewDelegate {
               let descriptor = view.currentRenderPassDescriptor else {
             return
         }
+
+        updateTimelineRing()
 
         let viewport = SIMD2<Float>(
             Float(view.drawableSize.width),

@@ -11,6 +11,15 @@ public struct SMConfiguration: Equatable {
     public var maxHeight: CGFloat
     public var thickness: CGFloat
     public var softness: Float
+
+    /// Override dot radius (points). When nil, falls back to `thickness`.
+    /// Used by `.analogDots`.
+    public var dotRadius: CGFloat?
+
+    /// Override bar width (points). When nil, falls back to `thickness`.
+    /// Used by `.digital`.
+    public var barWidth: CGFloat?
+
     public var path: SMPath
     public var gradient: SMColorGradient
     public var sideMode: SMSide
@@ -67,6 +76,13 @@ public struct SMConfiguration: Equatable {
     /// strong frequency clusters.
     public var circleMirrorPeaks: Int
 
+    /// When true, magnitudes are run through the same processing pipeline
+    /// used by circle styles (peak detection, envelope, taper) before
+    /// reaching the shader — for any style, not just circle. When false
+    /// (default), raw smoothed magnitudes are passed directly. Use this to
+    /// toggle between raw FFT data and enhanced/cooked display.
+    public var processedData: Bool
+
     /// Orientation of the band axis for line-based styles. Default
     /// `.horizontal` (bands left → right). Set `.vertical` to run bands
     /// top → bottom with bars extending horizontally. Circle styles ignore
@@ -81,6 +97,8 @@ public struct SMConfiguration: Equatable {
         maxHeight: CGFloat = 200,
         thickness: CGFloat = 6,
         softness: Float = 0.3,
+        dotRadius: CGFloat? = nil,
+        barWidth: CGFloat? = nil,
         path: SMPath = .line(from: CGPoint(x: 0, y: 0.5), to: CGPoint(x: 1, y: 0.5)),
         gradient: SMColorGradient = .cyanMagenta,
         sideMode: SMSide = .both,
@@ -94,6 +112,7 @@ public struct SMConfiguration: Equatable {
         circleMirror: Float = 0,
         circleMirrorPhase: Float = 0,
         circleMirrorPeaks: Int = 4,
+        processedData: Bool = false,
         orientation: SMOrientation = .horizontal
     ) {
         precondition(bandCount >= 8 && bandCount <= 1024, "bandCount out of range.")
@@ -110,6 +129,8 @@ public struct SMConfiguration: Equatable {
         self.maxHeight = maxHeight
         self.thickness = thickness
         self.softness = softness
+        self.dotRadius = dotRadius
+        self.barWidth = barWidth
         self.path = path
         self.gradient = gradient
         self.sideMode = sideMode
@@ -123,6 +144,7 @@ public struct SMConfiguration: Equatable {
         self.circleMirror = circleMirror
         self.circleMirrorPhase = circleMirrorPhase
         self.circleMirrorPeaks = circleMirrorPeaks
+        self.processedData = processedData
         self.orientation = orientation
     }
 }
@@ -272,13 +294,22 @@ extension SMConfiguration {
 extension SMConfiguration {
     /// Converts this configuration into the renderer-side descriptor.
     func renderStyleDescriptor() -> RenderStyleDescriptor {
-        RenderStyleDescriptor(
+        let effectiveThickness: CGFloat
+        switch style {
+        case .analogDots:
+            effectiveThickness = dotRadius ?? thickness
+        case .digital:
+            effectiveThickness = barWidth ?? thickness
+        default:
+            effectiveThickness = thickness
+        }
+        return RenderStyleDescriptor(
             style: style.renderStyle(circleMode: circleMode),
             path: path.renderPath,
             sideMode: sideMode.renderSideMode,
             gradient: gradient.renderGradient,
             maxHeight: maxHeight,
-            thickness: thickness,
+            thickness: effectiveThickness,
             softness: softness,
             barSpacing: barSpacing,
             circleBaseRadius: circleBaseRadius,

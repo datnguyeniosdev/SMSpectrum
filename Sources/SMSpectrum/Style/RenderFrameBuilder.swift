@@ -94,7 +94,9 @@ final class RenderFrameBuilder {
 
     func makeRenderFrame(magnitudes: [Float], timestamp: TimeInterval) -> RenderFrame {
         let isCircleStyle = (configuration.style == .circle || configuration.style == .circleLine)
-        let resolved = isCircleStyle && configuration.circleMirror > 0
+        let shouldProcess = isCircleStyle && configuration.circleMirror > 0
+                          || configuration.processedData
+        let resolved = shouldProcess
             ? processCircleSpectrum(magnitudes, timestamp: timestamp)
             : magnitudes
         return RenderFrame(
@@ -210,6 +212,14 @@ final class RenderFrameBuilder {
                 w = 1.0
             }
             data[i] *= w
+        }
+
+        // — 9. Baseline ring ————————————————————————————————
+        // Always inject a faint ring so the display area is
+        // visible even during silence.
+        let baseRing: Float = 0.06
+        for i in 0..<n {
+            data[i] = max(data[i], baseRing)
         }
         return data
     }

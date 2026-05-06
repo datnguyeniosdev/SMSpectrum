@@ -17,20 +17,50 @@ struct AudioFileDemoView: View {
     @State private var circleMirror: Double = 0.25
     @State private var circleMirrorPhase: Double = 0
     @State private var circularTemplate: CircularTemplate = .off
+    @State private var processedData: Bool = false
     @State private var selectedURL: URL? = Bundle.main.url(forResource: "demo", withExtension: "mp3")
     @State private var fileName: String?
     @State private var isImporterPresented = false
     @State private var errorMessage: String?
+    @State private var bassLevel: Float = 0
+    @State private var midLevel: Float = 0
+    @State private var trebleLevel: Float = 0
 
     var body: some View {
         VStack(spacing: 16) {
             if let url = selectedURL {
-                SpectrumViewRepresentable(
-                    source: .file(url),
-                    configuration: configuration,
-                    onError: { errorMessage = $0.description }
-                )
-                .frame(height: 280)
+                ZStack {
+                    SpectrumViewRepresentable(
+                        source: .file(url),
+                        configuration: configuration,
+                        onBassLevel: { bassLevel = $0 },
+                        onSpectrum: { bassLevel = $0; midLevel = $1; trebleLevel = $2 },
+                        onError: { errorMessage = $0.description }
+                    )
+                    .frame(height: 280)
+
+//                    Circle()
+//                        .fill(
+//                            LinearGradient(
+//                                colors: [
+//                                    .blue.opacity(0.7 + Double(trebleLevel) * 0.3),
+//                                    .purple.opacity(0.5 + Double(midLevel) * 0.5),
+//                                    .pink.opacity(0.6 + Double(bassLevel) * 0.4)
+//                                ],
+//                                startPoint: .top,
+//                                endPoint: .bottom
+//                            )
+//                        )
+//                        .frame(width: 100, height: 100)
+//                        .scaleEffect(1 + CGFloat(bassLevel) * 0.15 + CGFloat(midLevel) * 0.05)
+//                        .animation(.easeOut(duration: 0.08), value: bassLevel)
+
+//                    Text(fileName ?? "▶")
+//                        .font(.caption.weight(.medium))
+//                        .foregroundColor(.white)
+//                        .scaleEffect(1 + CGFloat(trebleLevel) * 0.1)
+//                        .animation(.easeOut(duration: 0.05), value: trebleLevel)
+                }
                 .background(Color.black)
                 .clipShape(RoundedRectangle(cornerRadius: 16))
                 .padding(.horizontal)
@@ -64,7 +94,8 @@ struct AudioFileDemoView: View {
                 bloomRadius: $bloomRadius,
                 circleMirror: $circleMirror,
                 circleMirrorPhase: $circleMirrorPhase,
-                circularTemplate: $circularTemplate
+                circularTemplate: $circularTemplate,
+                processedData: $processedData
             )
 
             if let errorMessage {
@@ -114,6 +145,7 @@ struct AudioFileDemoView: View {
                     : nil,
             circleMirror: Float(circleMirror),
             circleMirrorPhase: Float(circleMirrorPhase),
+            processedData: processedData,
             orientation: orientation
         )
     }

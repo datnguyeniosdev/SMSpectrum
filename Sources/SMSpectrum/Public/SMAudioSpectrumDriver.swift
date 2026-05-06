@@ -46,6 +46,9 @@ public final class SMAudioSpectrumDriver {
     /// Called on the main thread when the audio engine reports an error.
     public var onError: ((SMError) -> Void)?
 
+    /// Called with playback progress 0…1 for file sources. nil for microphone.
+    public var onPlaybackProgress: ((Float) -> Void)?
+
     public private(set) var isRunning: Bool = false
     public private(set) var currentSource: SMSource?
 
@@ -72,6 +75,11 @@ public final class SMAudioSpectrumDriver {
         audioEngine.onError = { [weak self] error in
             DispatchQueue.main.async {
                 self?.onError?(error)
+            }
+        }
+        audioEngine.onPlaybackProgress = { [weak self] progress in
+            DispatchQueue.main.async {
+                self?.onPlaybackProgress?(progress)
             }
         }
     }

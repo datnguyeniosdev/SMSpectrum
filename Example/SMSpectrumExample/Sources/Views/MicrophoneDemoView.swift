@@ -16,6 +16,7 @@ struct MicrophoneDemoView: View {
     @State private var circleMirror: Double = 0.25
     @State private var circleMirrorPhase: Double = 0
     @State private var circularTemplate: CircularTemplate = .off
+    @State private var processedData: Bool = false
     @State private var errorMessage: String?
 
     var body: some View {
@@ -44,7 +45,8 @@ struct MicrophoneDemoView: View {
                 bloomRadius: $bloomRadius,
                 circleMirror: $circleMirror,
                 circleMirrorPhase: $circleMirrorPhase,
-                circularTemplate: $circularTemplate
+                circularTemplate: $circularTemplate,
+                processedData: $processedData
             )
 
             if let errorMessage {
@@ -87,6 +89,7 @@ struct MicrophoneDemoView: View {
                     : nil,
             circleMirror: Float(circleMirror),
             circleMirrorPhase: Float(circleMirrorPhase),
+            processedData: processedData,
             orientation: orientation
         )
     }

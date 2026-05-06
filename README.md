@@ -2,17 +2,26 @@
 
 A high-performance audio spectrum visualization SDK for iOS, inspired by Adobe After Effects' Audio Spectrum effect. Powered by Metal and Accelerate.
 
-> Status: **v1.0 in development** — realtime audio visualization. v2.0 will add offline video export.
+▶️ **[Watch Demo Video](demo.mov)**
+
+> Version **0.1.0** — realtime audio visualization with symmetric circle support, peak animation, and timeline overlay.
 
 ## Features
 
-- Six render styles: digital bars, analog lines, analog dots, radial bars, smooth Cubic Hermite ring, line gradient, time-domain waveform
-- Multiple audio sources: file playback, microphone, external `AVAudioEngine` tap, manual PCM push
-- Bring-your-own-data path: feed pre-computed magnitudes directly (network feed, simulation, custom DSP)
+- **9 render styles**: digital bars, analog lines, analog dots, radial bars, Cubic Hermite ring, circle line (stroke-only), line gradient, time-domain waveform, symmetric circle mirror
+- **Symmetric circle rendering** — mirror spectrum around a closed ring with Tukey window tapering, configurable peak count (1–6), and inertia-based peak animation for smooth transitions
+- **Peak animation** — peaks glide smoothly between frames with velocity tracking, fade-in/fade-out, and frequency-constrained widths
+- **Processed vs raw toggle** — switch between enhanced/cooked data pipeline and raw magnitudes for all styles
+- **Timeline ring** — inner circular progress ring synced to real audio playback time
+- **Bass/Mid/Treble delegate** — three-band frequency energy for driving audio-reactive UI animations
+- **Circle line style** — circular stroke tracing magnitudes around a ring (stroke only, no fill)
+- **Custom dot/bar sizing** — `dotRadius` and `barWidth` overrides for analog dots and digital bars
+- **Multiple audio sources**: file playback, microphone, external `AVAudioEngine` tap, manual PCM push
+- **Bring-your-own-data** path: feed pre-computed magnitudes directly (network feed, simulation, custom DSP)
 - Configurable frequency range, band count, FFT size, attack/release smoothing, color gradient, geometric path
-- Multi-layer rendering — slice the path into segments, each with its own gradient and thickness
+- **Multi-layer rendering** — slice the path into segments, each with its own gradient and thickness
 - Horizontal or vertical orientation for line-based styles, with one-sided or mirrored side modes
-- Optional post-process bloom (separable gaussian, half-resolution) — works with every style
+- **Post-process bloom** — separable gaussian at half resolution, style-agnostic
 - Metal-powered renderer at 60/120 Hz with triple buffering
 - Real-time DSP via `Accelerate.vDSP`
 - Modular architecture: `SMSpectrumRenderer` is independent of the `SMSpectrum` audio layer
@@ -30,7 +39,7 @@ A high-performance audio spectrum visualization SDK for iOS, inspired by Adobe A
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/darrennguyen/SMSpectrum.git", from: "1.0.0")
+    .package(url: "https://github.com/darrennguyen/SMSpectrum.git", from: "0.1.0")
 ]
 ```
 
@@ -42,13 +51,9 @@ The package vends two products:
 ### CocoaPods
 
 ```ruby
-pod 'SMSpectrum', '~> 1.0'         # Core (default subspec — pulls in Renderer)
-pod 'SMSpectrum/Renderer', '~> 1.0' # Renderer only
+pod 'SMSpectrum', '~> 0.1'         # Core (default subspec — pulls in Renderer)
+pod 'SMSpectrum/Renderer', '~> 0.1' # Renderer only
 ```
-
-### XCFramework
-
-Pre-built binaries available in [Releases](https://github.com/darrennguyen/SMSpectrum/releases).
 
 ## Quick Start
 
@@ -61,7 +66,9 @@ driver.attach(to: view)
 try driver.start(source: .microphone)
 ```
 
-That's it — `SMSpectrumView` is a `MTKView` subclass, add it to your view hierarchy and it draws automatically. See `Example/SMSpectrumExample` for a full SwiftUI demo.
+That's it — `SMSpectrumView` is a `MTKView` subclass, add it to your view hierarchy and it draws automatically.
+
+See `Example/SMSpectrumExample` for a full SwiftUI demo app with microphone, file playback, and circle line preview tabs.
 
 ## Three ways to drive the view
 
@@ -84,29 +91,21 @@ Available sources:
 
 - `.file(URL)` — local audio file playback
 - `.microphone` — live mic input via the shared audio session
-- `.audioEngine(AVAudioEngine, node: AVAudioNode)` — taps an existing engine, useful when audio is already running for another purpose
+- `.audioEngine(AVAudioEngine, node: AVAudioNode)` — taps an existing engine
 - `.manual` — you push PCM buffers via `driver.push(pcmBuffer:sampleRate:time:)`
 
 ### 2. Bring-your-own data (no audio engine)
 
-Skip the driver entirely and push frames yourself — useful for network-streamed magnitudes, music game simulations, or custom DSP:
-
 ```swift
 let view = try SMSpectrumView(configuration: .digital)
 
-// One-time: figure out the Hz layout if you care which slot is which.
 let frequencies = view.configuration.bandCenterFrequencies(sampleRate: 48_000)
-
-// Per frame: push 0...1 magnitudes. Length should equal bandCount;
-// mismatched lengths are treated as raw FFT half-bins and remapped.
 view.push(magnitudes: myMagnitudes)
 ```
 
-`push(magnitudes:)` is thread-safe. Smoothing (`SMConfiguration.smoothing` and `bandSmoothing`) is applied internally before rendering.
+`push(magnitudes:)` is thread-safe. Smoothing is applied internally before rendering.
 
-### 3. Renderer-only (no `SMSpectrumView`, no audio)
-
-For exotic cases — offscreen rendering, custom view hierarchies, or video export — depend on `SMSpectrumRenderer` directly and feed it `RenderFrame` values:
+### 3. Renderer-only
 
 ```swift
 import SMSpectrumRenderer
@@ -114,71 +113,100 @@ import SMSpectrumRenderer
 let renderer = try SpectrumRenderer()
 renderer.attach(to: myMTKView)
 
-let frame = RenderFrame(
-    magnitudes: myMagnitudes,
-    timestamp: CACurrentMediaTime(),
-    style: myDescriptor
-)
+let frame = RenderFrame(magnitudes: myMagnitudes, timestamp: CACurrentMediaTime(), style: myDescriptor)
 try renderer.render(frame: frame, drawable: drawable, renderPassDescriptor: pass, viewportSize: size)
 ```
 
-The renderer is fully audio-agnostic — this is the seam that v2.0's video exporter will reuse.
-
 ## Configuration
 
-`SMConfiguration` is the single source of truth for visual style. Built-in presets cover most cases:
+`SMConfiguration` is the single source of truth for visual style. Built-in presets:
 
-| Preset             | Style          | Notes                                                     |
-| ------------------ | -------------- | --------------------------------------------------------- |
-| `.digital`         | digital bars   | Highest performance, classic VU look                      |
-| `.analogLines`     | polyline       | Smooth continuous curve with softness/glow                |
-| `.analogDots`      | dots           | One dot per band                                          |
-| `.circle`          | radial bars    | Bars radiating outward from a circle                      |
-| `.circleHermite`   | filled ring    | Donut sector fill — alpha fades inward from the curve     |
-| `.circleWaveform`  | filled ring    | Snappier filled ring — sharp transients travel around     |
-| `.lineGradient`    | filled area    | Filled area under curve, horizontal hue + vertical fade   |
-| `.waveform`        | flat waveform  | Thin solid line with sharp transient peaks                |
+| Preset                      | Style         | Notes |
+| --------------------------- | ------------- | ----- |
+| `.digital`                  | digital bars  | Highest performance, classic VU look |
+| `.analogLines`              | polyline      | Smooth continuous curve with softness/glow |
+| `.analogDots`               | dots          | One dot per band |
+| `.circle`                   | radial bars   | Bars radiating outward from a circle |
+| `.circleHermite`            | filled ring   | Donut sector fill — alpha fades inward |
+| `.circleMirrored`           | radial bars   | Symmetric bars with mirror + bloom |
+| `.circleHermiteMirrored`    | filled ring   | Symmetric Hermite curve with mirror + bloom |
+| `.circleLine`               | circle stroke | Circular stroke trace — stroke only, no fill |
+| `.circleWaveform`           | filled ring   | Snappier filled ring for transients |
+| `.lineGradient`             | filled area   | Filled area under curve |
+| `.waveform`                 | flat waveform | Thin solid line with sharp transients |
 
-Customize any preset by mutating its fields:
+### Key configuration fields
 
 ```swift
 var config = SMConfiguration.digital
-config.frequencyRange = 60...12_000
-config.bandCount = 64
-config.gradient = .rainbow
-config.smoothing = .silky          // .snappy / .balanced / .smooth / .silky
-config.bandSmoothing = 0.5         // 0...1, extra spatial blur across bands
+config.style = .circleLine
+config.bandCount = 128
+config.maxHeight = 80
+config.softness = 0.4
+config.sideMode = .both
+config.gradient = .cyanMagenta
+config.smoothing = .silky
+config.bandSmoothing = 0.6
+
+// Circle mirror — symmetric display
+config.circleMirror = 0.25        // 0…1 taper fraction
+config.circleMirrorPhase = 0       // 0…1 rotation
+config.circleMirrorPeaks = 4       // 1…6 visible peaks
+
+// Processed data (apply to any style)
+config.processedData = false       // true = enhanced pipeline
+
+// Custom sizing
+config.dotRadius = 8               // analog dots
+config.barWidth = 3                // digital bars
+
+// Bloom
+config.bloomFilter = SMBloomFilter(intensity: 0.5, threshold: 0.3, radius: 12)
+
 view.configuration = config
 ```
 
-Key fields:
+### Circle Mirror — symmetric display
 
-- `style` — visual style enum (see Styles below)
-- `frequencyRange` — Hz min...max for log-band layout, default `20...20_000`
-- `bandCount` — 8...1024, default 96
-- `fftSize` — `.size512` / `.size1024` / `.size2048` / `.size4096`. Larger = finer frequency resolution, more latency
-- `maxHeight` — peak height in points
-- `thickness` — bar / line / dot size in points
-- `softness` — 0...1, edge feather for analog styles
-- `path` — geometric layout (`.line` / `.circle` / `.custom(CGPath)`)
-- `gradient` — color sweep along the band axis (`.cyanMagenta`, `.warmSunset`, `.rainbow`, or custom)
-- `sideMode` — `.sideA` / `.sideB` / `.both` (mirrored)
-- `smoothing` — attack/release time constants (`.snappy` / `.balanced` / `.smooth` / `.silky`)
-- `barSpacing` — 0...1 fractional gap between bars (circle bars only)
-- `circleMode` — `.bars` or `.cubicHermite` for the `.circle` style
-- `circleBaseRadius` — inner ring radius for `.circleHermite`
-- `layers` — multi-layer rendering (see below)
-- `bloomFilter` — optional post-process bloom (see Bloom below)
-- `orientation` — `.horizontal` (default) or `.vertical` for line-based styles (see Orientation below)
+When `circleMirror > 0` and style is `.circle` or `.circleLine`, the spectrum is mirrored and processed:
+
+```
+[lowFreq...highFreq] → mirror → [lowFreq...highFreq...lowFreq]
+  ↓
+Normalize by smoothed global max → detect peaks → build cosine hills → Tukey seam taper
+```
+
+| Parameter | Range | Description |
+| --------- | ----- | ----------- |
+| `circleMirror` | 0…1 | Taper fraction at seam (0.4 = 20% each end) |
+| `circleMirrorPhase` | 0…1 | Rotate spectrum around the ring |
+| `circleMirrorPeaks` | 1…6 | Max visible peaks |
+
+### Processed Data Toggle
+
+`processedData: Bool` applies the peak detection + envelope + taper pipeline to **any style**, not just circles. Turn it on to transform raw FFT data into enhanced, animation-ready magnitudes.
+
+### Timeline Ring
+
+```swift
+// Built-in circular progress indicator
+view.timelineProgress = 0.45  // 45% through the song
+
+// Change color
+view.timelineColor = UIColor.white.withAlphaComponent(0.6).cgColor
+```
+
+When using `SMAudioSpectrumDriver` with a `.file` source, progress is tracked automatically via `AVAudioPlayerNode`:
+
+```swift
+driver.onPlaybackProgress = { progress in
+    view.timelineProgress = CGFloat(progress)
+}
+```
 
 ## Layers
 
-By default a configuration draws the path once with the config-level gradient and thickness. Pass an array of `SMLayer` to slice the path into independent segments, each with its own gradient, thickness, and (for `.circleHermite`) radial offset / angular phase.
-
-`range` is interpreted by the active style:
-
-- **`.circle`**: angles in radians (CCW from +X). `0...(2π)` is a full ring.
-- **All other styles**: normalized position along the path, `0...1`.
+Pass an array of `SMLayer` to slice the path into independent segments:
 
 ```swift
 let twoPi = CGFloat.pi * 2
@@ -188,70 +216,31 @@ config.layers = [
 ]
 ```
 
-For ribbon-style `.circleHermite` displays, use the convenience builder:
+For ribbon-style displays:
 
 ```swift
-config.layers = SMLayer.circleRibbon(
-    count: 8,
-    radialSpread: 40,
-    phaseSpread: 0.15,
-    gradient: .rainbow
-)
+config.layers = SMLayer.circleRibbon(count: 8, radialSpread: 40, phaseSpread: 0.15, gradient: .rainbow)
 ```
 
-> **Note**: `.circleHermite` renders as a **filled donut sector** — `SMLayer.thickness` is ignored. The fill spans `circleBaseRadius` (inner) to `circleBaseRadius + magnitude * maxHeight` (outer); alpha is full at the outer edge and fades inward, controlled by `softness`.
-
-## Orientation
-
-`SMConfiguration.orientation` rotates the band axis 90° for line-based styles (`.digital`, `.analogLines`, `.analogDots`, `.lineGradient`, `.waveform`). Circle styles ignore it.
-
-| Orientation     | Bands run    | Bars extend       | `sideMode` mapping            |
-| --------------- | ------------ | ----------------- | ----------------------------- |
-| `.horizontal`   | left → right | up / down         | `.sideA` = top, `.sideB` = bottom, `.both` = mirrored |
-| `.vertical`     | top → bottom | right / left      | `.sideA` = right, `.sideB` = left, `.both` = mirrored |
-
-```swift
-var config = SMConfiguration.digital
-config.orientation = .vertical
-config.sideMode = .sideA      // bars extend to the right only
-view.configuration = config
-```
-
-## Bloom
-
-`SMConfiguration.bloomFilter` enables a post-process bloom that runs after the spectrum is drawn. The renderer renders into an offscreen texture, isolates pixels above `threshold`, gaussian-blurs them at half resolution, and composites the result into the drawable. It is style-agnostic — every render style benefits.
-
-```swift
-var config = SMConfiguration.circleHermite
-config.bloomFilter = SMBloomFilter(intensity: 0.8, threshold: 0.4, radius: 14)
-view.configuration = config
-```
-
-Built-in presets: `.soft`, `.neon`, `.dreamy`. Set `bloomFilter = nil` to disable (default).
-
-Knobs:
-
-- `intensity` — strength of the blurred bright pass (0 = invisible, 1 = standard, > 1 = overdrive)
-- `threshold` — luminance cutoff (0...1); only pixels brighter than this contribute
-- `radius` — blur radius in points; larger values produce softer, wider bloom
-
-## Delegate callbacks
+## Delegate (audio-reactive animations)
 
 ```swift
 final class Coordinator: NSObject, SMSpectrumViewDelegate {
     func spectrumView(_ view: SMSpectrumView, didProduce frame: SMSpectrumFrame) {
-        // frame.magnitudes        — 0...1 per band
-        // frame.timestamp         — seconds
-        // frame.bandFrequencies   — Hz per band
+        // frame.magnitudes, frame.timestamp, frame.bandFrequencies
     }
-    func spectrumView(_ view: SMSpectrumView, didFailWith error: SMError) {
-        // Renderer or audio engine errors. Main thread.
+    func spectrumView(_ view: SMSpectrumView, didUpdateBassLevel level: Float) {
+        // 0…1 — drive album art pulse
+        albumArtView.transform = CGAffineTransform(scaleX: 1 + CGFloat(level) * 0.1,
+                                                    y: 1 + CGFloat(level) * 0.1)
     }
+    func spectrumView(_ view: SMSpectrumView, didUpdateSpectrum bass: Float, mid: Float, treble: Float) {
+        // Three-band energy for richer animations
+    }
+    func spectrumView(_ view: SMSpectrumView, didFailWith error: SMError) {}
 }
 view.spectrumDelegate = coordinator
 ```
-
-Useful for syncing animations to the audio, recording analysis output, or driving secondary UI.
 
 ## Architecture
 
@@ -259,20 +248,6 @@ Useful for syncing animations to the audio, recording analysis output, or drivin
 SMSpectrum (public API + audio + style)
     └── depends on ──▶ SMSpectrumRenderer (Metal-only)
 ```
-
-`SMSpectrumRenderer` knows nothing about audio — it consumes pre-computed `RenderFrame` data containing magnitudes + a `RenderStyleDescriptor`. The `SMSpectrum` layer adds:
-
-- `SMAudioSpectrumDriver` — `AVAudioEngine` capture + `vDSP` FFT + log-band mapping
-- `SMSpectrumView` — `MTKView` wrapper that owns a `SpectrumRenderer` and applies smoothing
-- Public Swift-friendly types (`SMConfiguration`, `SMStyle`, `SMSource`, `SMColorGradient`, etc.)
-
-This separation enables v2.0's video export without coupling the renderer to a realtime audio path.
-
-### Threading
-
-- `SMSpectrumView.push(magnitudes:)` and `push(frame:)` are safe from any thread.
-- `SMAudioSpectrumDriver.onFrame` fires on a background thread — dispatch to main yourself if your handler touches UI.
-- `onError` and the view delegate methods are called on the main thread.
 
 ## License
 
